@@ -1,5 +1,7 @@
 package troy.autofish.monitor;
 
+import org.apache.logging.log4j.Level;
+
 import net.minecraft.block.Material;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.projectile.FishingBobberEntity;
@@ -14,12 +16,18 @@ import troy.autofish.Autofish;
 
 public class FishMonitorMPMotion implements FishMonitorMP {
 
+    // The threshold of detecting a bobber moving downwards, to detect as a fish.
     public static final int PACKET_MOTION_Y_THRESHOLD = -350;
 
-    //True if the hook hit water then started to rise.
-    private boolean catchable = false;
-    private long catchableAt = 0L;
+    // Start catching fish after a 1 second threshold.
+    public static final int START_CATCHING_AFTER_THRESHOLD = 1000;
+
+    // True if the bobber is in the water.
     private boolean hasHitWater = false;
+    
+    // Time at which bobber begins to rise in the water.
+    // 0 if the bobber has not rose in the water yet.
+    private long bobberRiseTimestamp = 0;
 
 
     @Override
@@ -32,6 +40,7 @@ public class FishMonitorMPMotion implements FishMonitorMP {
     @Override
     public void handleHookRemoved() {
         hasHitWater = false;
+        bobberRiseTimestamp = 0;
     }
 
     @Override
@@ -40,16 +49,24 @@ public class FishMonitorMPMotion implements FishMonitorMP {
             EntityVelocityUpdateS2CPacket velocityPacket = (EntityVelocityUpdateS2CPacket) packet;
             if (minecraft.player != null && minecraft.player.fishHook != null && minecraft.player.fishHook.getEntityId() == velocityPacket.getId()) {
 
-                //hook starts to rise after sinking in water
-                if (hasHitWater && !catchable && velocityPacket.getVelocityY() > 0) {
-                    catchable = true;
-                    catchableAt = autofish.timeMillis;
+                // Wait until the bobber has rose in the water.
+                // Prevent remarking the bobber rise timestamp until it is reset by catching.
+                if (hasHitWater && bobberRiseTimestamp == 0 && velocityPacket.getVelocityY() > 0) {
+                    // Mark the time in which the bobber began to rise.
+                    bobberRiseTimestamp = autofish.timeMillis;
                 }
 
-                if (hasHitWater && catchable && (autofish.timeMillis - catchableAt > 500)) {
+                // Calculate the time in which the bobber has been in the water
+                long timeInWater = autofish.timeMillis - bobberRiseTimestamp;
+
+                // If the bobber has been in the water long enough, start detecting the bobber movement.
+                if (hasHitWater && bobberRiseTimestamp != 0 && timeInWater > START_CATCHING_AFTER_THRESHOLD) {
                     if (velocityPacket.getVelocityX() == 0 && velocityPacket.getVelocityZ() == 0 && velocityPacket.getVelocityY() < PACKET_MOTION_Y_THRESHOLD) {
+                        // Catch the fish
                         autofish.catchFish();
-                        hasHitWater = false;
+
+                        // Reset the class attributes to default.
+                        this.handleHookRemoved();
                     }
                 }
             }
